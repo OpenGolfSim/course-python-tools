@@ -1,0 +1,10 @@
+name: ogs_python_tools
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.10
+  - gdal>=3.8
+  - pdal>=2.7
+  - python-pdal
+  - pip
