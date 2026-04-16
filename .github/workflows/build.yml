@@ -4,7 +4,7 @@ on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
-    branches: ["main"]
+    # branches: ["main"]
 
 jobs:
 
@@ -16,11 +16,11 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact_name: ogs-tools-windows.zip
-          # - os: macos-13
-          #   artifact_name: ogs-tools-macos-x64.zip
+            artifact_name: python-env-windows.zip
+          # - os: macos-13 # Intel Mac (x64)
+          #   artifact_name: python-env-macos-x64.tar.gz
           - os: macos-latest
-            artifact_name: ogs-tools-macos-arm64.zip
+            artifact_name: python-env-macos-arm64.tar.gz
 
     steps:
       - name: Checkout Code
@@ -34,77 +34,21 @@ jobs:
           activate-environment: ogs_python_tools
           environment-file: environment.yml
           channels: conda-forge,nodefaults
-
-      - name: Extract lean binaries (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $src = "$env:CONDA_PREFIX"
-          $out = "dist"
-          New-Item -ItemType Directory -Force -Path $out
-
-          # CLI binaries
-          $bins = @("pdal.exe", "gdal_translate.exe", "gdaldem.exe", "gdalinfo.exe", "gdal_grid.exe", "gdal_rasterize.exe")
-          foreach ($bin in $bins) {
-            $path = Join-Path $src "Library\bin\$bin"
-            if (Test-Path $path) { Copy-Item $path $out; Write-Host "Copied $bin" }
-            else { Write-Warning "Not found: $bin" }
-          }
-
-          # All DLLs (pdal + gdal have many transitive deps — copy the lot)
-          Copy-Item "$src\Library\bin\*.dll" $out
-
-          # GDAL data (projections, format drivers)
-          Copy-Item -Recurse "$src\Library\share\gdal" "$out\gdal-data"
-
-          # PROJ data (coordinate transforms)
-          Copy-Item -Recurse "$src\Library\share\proj" "$out\proj-data"
-
-          Write-Host "Total size: $([math]::Round((Get-ChildItem $out -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 1)) MB"
-
-      - name: Extract lean binaries (macOS)
-        if: runner.os == 'macOS'
+      
+      - name: Install Requirements
+        shell: bash -el {0}
+        run: conda install -n base -c conda-forge conda-pack mamba -y
+      
+      - name: Cleanup Environment
         shell: bash -el {0}
         run: |
-          src="$CONDA_PREFIX"
-          out="dist"
-          mkdir -p "$out/lib"
+          conda clean --all -y
+          pip cache purge
 
-          # CLI binaries
-          for bin in pdal gdal_translate gdaldem gdalinfo gdal_grid gdal_rasterize; do
-            path="$src/bin/$bin"
-            if [ -f "$path" ]; then
-              cp "$path" "$out/"
-              echo "Copied $bin"
-            else
-              echo "WARNING: $bin not found"
-            fi
-          done
-
-          # All dylibs
-          cp "$src/lib/"*.dylib "$out/lib/" 2>/dev/null || true
-
-          # GDAL + PROJ data
-          cp -r "$src/share/gdal" "$out/gdal-data"
-          cp -r "$src/share/proj" "$out/proj-data"
-
-          # Patch rpath on each binary so dylibs resolve relative to the binary
-          for bin in pdal gdal_translate gdaldem gdalinfo gdal_grid gdal_rasterize; do
-            [ -f "$out/$bin" ] && install_name_tool -add_rpath @executable_path/lib "$out/$bin" 2>/dev/null || true
-          done
-
-          echo "Total size: $(du -sh $out | cut -f1)"
-
-      - name: Zip output (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: Compress-Archive -Path dist\* -DestinationPath ${{ matrix.artifact_name }}
-
-      - name: Zip output (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: cd dist && zip -r ../${{ matrix.artifact_name }} .
-
+      - name: Pack Environment
+        shell: bash -el {0}
+        run: conda run -n base conda-pack -n ogs_python_tools -o ${{ matrix.artifact_name }}
+      
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
